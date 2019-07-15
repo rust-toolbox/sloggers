@@ -140,11 +140,12 @@ impl FileLoggerBuilder {
         self
     }
 
-    fn build_with_drain<D>(&self, drain: D) -> Logger
+    pub fn build_with_drain<D>(&self, f: impl FnOnce(FileAppender) -> D) -> Logger
     where
         D: Drain + Send + 'static,
         D::Err: Debug,
     {
+        let drain = f(self.appender.clone());
         // async inside, level and key value filters outside for speed
         let drain = Async::new(drain.fuse())
             .chan_size(self.channel_size)
@@ -182,16 +183,19 @@ impl FileLoggerBuilder {
 
 impl Build for FileLoggerBuilder {
     fn build(&self) -> Result<Logger> {
-        let decorator = PlainDecorator::new(self.appender.clone());
         let timestamp = timezone_to_timestamp_fn(self.timezone);
         let logger = match self.format {
             Format::Full => {
-                let format = FullFormat::new(decorator).use_custom_timestamp(timestamp);
-                self.build_with_drain(format.build())
+                self.build_with_drain(|appender| FullFormat::new(PlainDecorator::new(appender))
+                    .use_custom_timestamp(timestamp)
+                    .build()
+                )
             }
             Format::Compact => {
-                let format = CompactFormat::new(decorator).use_custom_timestamp(timestamp);
-                self.build_with_drain(format.build())
+                self.build_with_drain(|appender| CompactFormat::new(PlainDecorator::new(appender))
+                    .use_custom_timestamp(timestamp)
+                    .build()
+                )
             }
         };
         Ok(logger)
@@ -199,7 +203,7 @@ impl Build for FileLoggerBuilder {
 }
 
 #[derive(Debug)]
-struct FileAppender {
+pub struct FileAppender {
     path: PathBuf,
     file: Option<BufWriter<File>>,
     truncate: bool,

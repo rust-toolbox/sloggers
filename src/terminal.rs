@@ -90,11 +90,12 @@ impl TerminalLoggerBuilder {
         self
     }
 
-    fn build_with_drain<D>(&self, drain: D) -> Logger
+    pub fn build_with_drain<D>(&self, f: impl FnOnce(Destination) -> D) -> Logger
     where
         D: Drain + Send + 'static,
         D::Err: Debug,
     {
+        let drain = f(self.destination);
         // async inside, level and key value filters outside for speed
         let drain = Async::new(drain.fuse())
             .chan_size(self.channel_size)
@@ -136,16 +137,19 @@ impl Default for TerminalLoggerBuilder {
 }
 impl Build for TerminalLoggerBuilder {
     fn build(&self) -> Result<Logger> {
-        let decorator = self.destination.to_decorator();
         let timestamp = timezone_to_timestamp_fn(self.timezone);
         let logger = match self.format {
             Format::Full => {
-                let format = FullFormat::new(decorator).use_custom_timestamp(timestamp);
-                self.build_with_drain(format.build())
+                self.build_with_drain(|destination| FullFormat::new(destination.to_decorator())
+                    .use_custom_timestamp(timestamp)
+                    .build()
+                )
             }
             Format::Compact => {
-                let format = CompactFormat::new(decorator).use_custom_timestamp(timestamp);
-                self.build_with_drain(format.build())
+                self.build_with_drain(|destination| CompactFormat::new(destination.to_decorator())
+                    .use_custom_timestamp(timestamp)
+                    .build()
+                )
             }
         };
         Ok(logger)
